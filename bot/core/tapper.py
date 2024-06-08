@@ -15,7 +15,7 @@ from pyrogram.raw.functions.messages import RequestWebView
 from bot.config import settings
 from bot.utils import logger
 from bot.utils.fingerprint import FINGERPRINT
-from bot.utils.scripts import escape_html
+from bot.utils.scripts import escape_html, decode_cipher
 from bot.exceptions import InvalidSession
 from .headers import headers
 
@@ -124,20 +124,21 @@ class Tapper:
 
     async def get_profile_data(self, http_client: aiohttp.ClientSession) -> dict[str]:
         response_text = ''
-        try:
-            response = await http_client.post(url='https://api.hamsterkombat.io/clicker/sync',
-                                              json={})
-            response_text = await response.text()
-            if response.status != 422:
-                response.raise_for_status()
+        while True:
+            try:
+                response = await http_client.post(url='https://api.hamsterkombat.io/clicker/sync',
+                                                  json={})
+                response_text = await response.text()
+                if response.status != 422:
+                    response.raise_for_status()
 
-            response_json = json.loads(response_text)
-            profile_data = response_json.get('clickerUser') or response_json.get('found', {}).get('clickerUser', {})
+                response_json = json.loads(response_text)
+                profile_data = response_json.get('clickerUser') or response_json.get('found', {}).get('clickerUser', {})
 
-            return profile_data
-        except Exception as error:
-            logger.error(f"{self.session_name} | Неизвестная ошибка при получении данных профиля: {error} | Текст ответа: {escape_html(response_text)[:128]}...")
-            await asyncio.sleep(delay=3)
+                return profile_data
+            except Exception as error:
+                logger.error(f"{self.session_name} | Неизвестная ошибка при получении данных профиля: {error} | Текст ответа: {escape_html(response_text)[:128]}...")
+                await asyncio.sleep(delay=3)
 
     async def get_config(self, http_client: aiohttp.ClientSession) -> dict[str]:
         response_text = ''
@@ -148,7 +149,7 @@ class Tapper:
             response.raise_for_status()
 
             response_json = await response.json()
-            config = response_json['clickerConfig']
+            config = response_json
 
             return config
         except Exception as error:
@@ -263,8 +264,25 @@ class Tapper:
 
             return boosts
         except Exception as error:
-            logger.error(f"{self.session_name} | Неизвестная ошибка при получении бустов: {error} | Текст ответа: {escape_html(response_text)[:128]}...")
+            logger.error(f"{self.session_name} | Неизвестная ошибка при получении буста: {error} | "
+                         f"Response text: {escape_html(response_text)[:256]}...")
             await asyncio.sleep(delay=3)
+
+    async def claim_daily_cipher(self, http_client: aiohttp.ClientSession, cipher: str) -> bool:
+        response_text = ''
+        try:
+            response = await http_client.post(url='https://api.hamsterkombat.io/clicker/claim-daily-cipher',
+                                              json={'cipher': cipher})
+            response_text = await response.text()
+            response.raise_for_status()
+
+            return True
+        except Exception as error:
+            logger.error(f"{self.session_name} | Неизвестная ошибка при получении ежедневного шифра: {error} | "
+                         f"Текст ответа: {escape_html(response_text)[:256]}...")
+            await asyncio.sleep(delay=3)
+
+            return False
 
     async def send_taps(self, http_client: aiohttp.ClientSession, available_energy: int, taps: int) -> dict[str]:
         response_text = ''
@@ -298,7 +316,6 @@ class Tapper:
         active_turbo = False
 
         proxy_conn = ProxyConnector().from_url(proxy) if proxy else None
-
         http_client = aiohttp.ClientSession(headers=headers, connector=proxy_conn)
 
         if proxy:
@@ -308,6 +325,14 @@ class Tapper:
 
         while True:
             try:
+                if http_client.closed:
+                    if proxy_conn:
+                        if not proxy_conn.closed:
+                            proxy_conn.close()
+
+                    proxy_conn = ProxyConnector().from_url(proxy) if proxy else None
+                    http_client = aiohttp.ClientSession(headers=headers, connector=proxy_conn)
+
                 if time() - access_token_created_time >= 3600:
                     access_token = await self.login(http_client=http_client, tg_web_data=tg_web_data)
 
@@ -319,12 +344,9 @@ class Tapper:
                     access_token_created_time = time()
 
                     await self.get_me_telegram(http_client=http_client)
-                    await self.get_config(http_client=http_client)
+                    game_config = await self.get_config(http_client=http_client)
 
                     profile_data = await self.get_profile_data(http_client=http_client)
-
-                    if not profile_data:
-                        continue
 
                     last_passive_earn = profile_data['lastPassiveEarn']
                     earn_on_hour = profile_data['earnPassivePerHour']
@@ -339,7 +361,6 @@ class Tapper:
                     balance = int(profile_data.get('balanceCoins', 0))
 
                     upgrades = await self.get_upgrades(http_client=http_client)
-                    boosts = await self.get_boosts(http_client=http_client)
                     tasks = await self.get_tasks(http_client=http_client)
 
                     daily_task = tasks[-1]
@@ -355,6 +376,23 @@ class Tapper:
                             logger.success(f"{self.session_name} | Успешно получено ежедневная награда | Дни: <m>{days}</m> | Награда в монетах: {rewards[days - 1]['rewardCoins']}")
 
                     await asyncio.sleep(delay=2)
+
+                    daily_cipher = game_config.get('dailyCipher')
+                    if daily_cipher:
+                        cipher = daily_cipher['cipher']
+                        bonus = daily_cipher['bonusCoins']
+                        is_claimed = daily_cipher['isClaimed']
+
+                        if not is_claimed and cipher:
+                            decoded_cipher = decode_cipher(cipher=cipher)
+
+                            status = await self.claim_daily_cipher(http_client=http_client, cipher=decoded_cipher)
+                            if status is True:
+                                logger.success(f"{self.session_name} | "
+                                               f"Успешно собран ежедневный шифр: <y>{decoded_cipher}</y> | "
+                                               f"Бонус: <g>+{bonus:,}</g>")
+
+                        await asyncio.sleep(delay=2)
 
                     exchange_id = profile_data.get('exchangeId')
                     if not exchange_id:
@@ -384,8 +422,6 @@ class Tapper:
                 total = int(player_data.get('totalCoins', 0))
                 earn_on_hour = player_data['earnPassivePerHour']
 
-                energy_boost = next((boost for boost in boosts if boost['id'] == 'BoostFullAvailableTaps'), {})
-
                 balance_str = f"{balance:,}".replace(',', '.')
                 calc_taps_str = f"{calc_taps:,}".replace(',', '.')
                 total_str = f"{total:,}".replace(',', '.')
@@ -393,21 +429,6 @@ class Tapper:
                 logger.success(f"{self.session_name} | Успешный тап! | Баланс: <c>{balance_str}</c> (<g>+{calc_taps_str}</g>) | Всего: <e>{total_str}</e>")
 
                 if active_turbo is False:
-                    if (settings.APPLY_DAILY_ENERGY is True
-                            and available_energy < settings.MIN_AVAILABLE_ENERGY
-                            and energy_boost.get("cooldownSeconds", 0) == 0
-                            and energy_boost.get("level", 0) <= energy_boost.get("maxLevel", 0)):
-                        logger.info(f"{self.session_name} | Спим 5 секунд перед применением буста энергии")
-                        await asyncio.sleep(delay=5)
-
-                        status = await self.apply_boost(http_client=http_client, boost_id="BoostFullAvailableTaps")
-                        if status is True:
-                            logger.success(f"{self.session_name} | Успешно применен буст энергии")
-
-                            await asyncio.sleep(delay=1)
-
-                            continue
-
                     if settings.AUTO_UPGRADE is True:
                         for _ in range(settings.UPGRADES_COUNT):
                             available_upgrades = [
@@ -436,6 +457,7 @@ class Tapper:
                                 if ((free_money * 0.7) >= price
                                         and level <= settings.MAX_LEVEL
                                         and profit > 0
+                                        and price < settings.MAX_UPGRADE_PRICE
                                         and price < max_price_limit):
                                     heapq.heappush(queue, (-significance, upgrade_id, upgrade))
 
@@ -475,9 +497,27 @@ class Tapper:
                                 continue
 
                     if available_energy < settings.MIN_AVAILABLE_ENERGY:
+                        boosts = await self.get_boosts(http_client=http_client)
+                        energy_boost = next((boost for boost in boosts if boost['id'] == 'BoostFullAvailableTaps'), {})
+
+                        if (settings.APPLY_DAILY_ENERGY is True
+                                and energy_boost.get("cooldownSeconds", 0) == 0
+                                and energy_boost.get("level", 0) <= energy_boost.get("maxLevel", 0)):
+                            logger.info(f"{self.session_name} | Sleep 5s before apply energy boost")
+                            await asyncio.sleep(delay=5)
+
+                            status = await self.apply_boost(http_client=http_client, boost_id="BoostFullAvailableTaps")
+                            if status is True:
+                                logger.success(f"{self.session_name} | Успешно применён буст энергии")
+
+                                await asyncio.sleep(delay=1)
+
+                                continue
+
                         await http_client.close()
                         if proxy_conn:
-                            proxy_conn.close()
+                            if not proxy_conn.closed:
+                                proxy_conn.close()
 
                         random_sleep = randint(settings.SLEEP_BY_MIN_ENERGY[0], settings.SLEEP_BY_MIN_ENERGY[1])
 
@@ -486,16 +526,13 @@ class Tapper:
 
                         await asyncio.sleep(delay=random_sleep)
 
-                        proxy_conn = ProxyConnector().from_url(proxy) if proxy else None
-                        http_client = aiohttp.ClientSession(headers=headers, connector=proxy_conn)
-
                         access_token_created_time = 0
 
             except InvalidSession as error:
                 raise error
 
             except Exception as error:
-                logger.error(f"{self.session_name} | Unknown error: {error}")
+                logger.error(f"{self.session_name} | Неизвестная ошибка: {error}")
                 await asyncio.sleep(delay=3)
 
             else:

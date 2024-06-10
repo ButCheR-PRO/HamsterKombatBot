@@ -3,6 +3,7 @@ import heapq
 import asyncio
 from time import time
 from random import randint
+from datetime import datetime
 from urllib.parse import unquote
 
 import aiohttp
@@ -14,10 +15,8 @@ from pyrogram.raw.functions.messages import RequestWebView
 
 from bot.config import settings
 from bot.utils import logger
-from bot.utils.fingerprint import FINGERPRINT
-from bot.utils.scripts import escape_html, decode_cipher
+from bot.utils.scripts import escape_html, decode_cipher, get_headers, get_fingerprint
 from bot.exceptions import InvalidSession
-from .headers import headers
 
 
 class Tapper:
@@ -93,8 +92,9 @@ class Tapper:
     async def login(self, http_client: aiohttp.ClientSession, tg_web_data: str) -> str:
         response_text = ''
         try:
+            fingerprint = get_fingerprint(name=self.tg_client.name)
             response = await http_client.post(url='https://api.hamsterkombat.io/auth/auth-by-telegram-webapp',
-                                              json={"initDataRaw": tg_web_data, "fingerprint": FINGERPRINT})
+                                              json={"initDataRaw": tg_web_data, "fingerprint": fingerprint})
             response_text = await response.text()
             response.raise_for_status()
 
@@ -103,7 +103,24 @@ class Tapper:
 
             return access_token
         except Exception as error:
-            logger.error(f"{self.session_name} | Неизвестная ошибка при получении токена доступа: {error} | Текст ответа: {escape_html(response_text)[:128]}...")
+            logger.error(f"{self.session_name} | Неизвестная ошибка при получении Access Token: {error} | "
+                         f"Текст ответа: {escape_html(response_text)[:256]}...")
+            await asyncio.sleep(delay=3)
+
+    async def get_nuxt_builds(self, http_client: aiohttp.ClientSession) -> dict[str]:
+        response_text = ''
+        try:
+            response = await http_client.get(url='https://hamsterkombat.io/_nuxt/builds/meta/32ddd2fc-00f7-4814-bc32-8f160963692c.json')
+            response_text = await response.text()
+            response.raise_for_status()
+
+            response_json = await response.json()
+            nuxt_builds = response_json
+
+            return nuxt_builds
+        except Exception as error:
+            logger.error(f"{self.session_name} | Неизвестная ошибка при получении Nuxt Builds: {error} | "
+                         f"Текст ответа: {escape_html(response_text)[:256]}...")
             await asyncio.sleep(delay=3)
 
     async def get_me_telegram(self, http_client: aiohttp.ClientSession) -> dict[str]:
@@ -115,9 +132,9 @@ class Tapper:
             response.raise_for_status()
 
             response_json = await response.json()
-            tasks = response_json['telegramUser']
+            me = response_json['telegramUser']
 
-            return tasks
+            return me
         except Exception as error:
             logger.error(f"{self.session_name} | Неизвестная ошибка при получении информации о Telegram: {error} | Текст ответа: {escape_html(response_text)[:128]}...")
             await asyncio.sleep(delay=3)
@@ -202,6 +219,55 @@ class Tapper:
 
             return False
 
+    async def get_upgrades(self, http_client: aiohttp.ClientSession) -> dict[str]:
+        response_text = ''
+        try:
+            response = await http_client.post(url='https://api.hamsterkombat.io/clicker/upgrades-for-buy',
+                                              json={})
+            response_text = await response.text()
+            response.raise_for_status()
+
+            response_json = await response.json()
+            upgrades = response_json
+
+            return upgrades
+        except Exception as error:
+            logger.error(f"{self.session_name} | Неизвестная ошибка при получении Апгрейдов: {error} | "
+                         f"Текст ответа: {escape_html(response_text)[:256]}...")
+            await asyncio.sleep(delay=3)
+
+    async def get_boosts(self, http_client: aiohttp.ClientSession) -> list[dict]:
+        response_text = ''
+        try:
+            response = await http_client.post(url='https://api.hamsterkombat.io/clicker/boosts-for-buy', json={})
+            response_text = await response.text()
+            response.raise_for_status()
+
+            response_json = await response.json()
+            boosts = response_json['boostsForBuy']
+
+            return boosts
+        except Exception as error:
+            logger.error(f"{self.session_name} | Неизвестная ошибка при получении Бустов: {error} | "
+                         f"Текст ответа: {escape_html(response_text)[:256]}...")
+            await asyncio.sleep(delay=3)
+
+    async def get_combo_cards(self, http_client: aiohttp.ClientSession) -> dict[str]:
+        response_text = ''
+        try:
+            response = await http_client.get(url='https://api21.datavibe.top/api/GetCombo')
+            response_text = await response.text()
+            response.raise_for_status()
+
+            response_json = await response.json()
+            combo_cards = response_json
+
+            return combo_cards
+        except Exception as error:
+            logger.error(f"{self.session_name} | Неизвестная ошибка при получении Комбо карт: {error} | "
+                         f"Текст ответа: {escape_html(response_text)[:256]}...")
+            await asyncio.sleep(delay=3)
+
     async def apply_boost(self, http_client: aiohttp.ClientSession, boost_id: str) -> bool:
         response_text = ''
         try:
@@ -216,22 +282,6 @@ class Tapper:
             await asyncio.sleep(delay=3)
 
             return False
-
-    async def get_upgrades(self, http_client: aiohttp.ClientSession) -> list[dict]:
-        response_text = ''
-        try:
-            response = await http_client.post(url='https://api.hamsterkombat.io/clicker/upgrades-for-buy',
-                                              json={})
-            response_text = await response.text()
-            response.raise_for_status()
-
-            response_json = await response.json()
-            upgrades = response_json['upgradesForBuy']
-
-            return upgrades
-        except Exception as error:
-            logger.error(f"{self.session_name} | Неизвестная ошибка при получении улучшений: {error} | Текст ответа: {escape_html(response_text)[:128]}...")
-            await asyncio.sleep(delay=3)
 
     async def buy_upgrade(self, http_client: aiohttp.ClientSession, upgrade_id: str) -> tuple[bool, dict[str]]:
         response_text = ''
@@ -252,22 +302,6 @@ class Tapper:
 
             return False, {}
 
-    async def get_boosts(self, http_client: aiohttp.ClientSession) -> list[dict]:
-        response_text = ''
-        try:
-            response = await http_client.post(url='https://api.hamsterkombat.io/clicker/boosts-for-buy', json={})
-            response_text = await response.text()
-            response.raise_for_status()
-
-            response_json = await response.json()
-            boosts = response_json['boostsForBuy']
-
-            return boosts
-        except Exception as error:
-            logger.error(f"{self.session_name} | Неизвестная ошибка при получении буста: {error} | "
-                         f"Response text: {escape_html(response_text)[:256]}...")
-            await asyncio.sleep(delay=3)
-
     async def claim_daily_cipher(self, http_client: aiohttp.ClientSession, cipher: str) -> bool:
         response_text = ''
         try:
@@ -279,6 +313,21 @@ class Tapper:
             return True
         except Exception as error:
             logger.error(f"{self.session_name} | Неизвестная ошибка при получении ежедневного шифра: {error} | "
+                         f"Текст ответа: {escape_html(response_text)[:256]}...")
+            await asyncio.sleep(delay=3)
+
+            return False
+
+    async def claim_daily_combo(self, http_client: aiohttp.ClientSession) -> bool:
+        response_text = ''
+        try:
+            response = await http_client.post(url='https://api.hamsterkombat.io/clicker/claim-daily-combo', json={})
+            response_text = await response.text()
+            response.raise_for_status()
+
+            return True
+        except Exception as error:
+            logger.error(f"{self.session_name} | Неизвестная ошибка при получении ежедневного комбо: {error} | "
                          f"Текст ответа: {escape_html(response_text)[:256]}...")
             await asyncio.sleep(delay=3)
 
@@ -315,6 +364,8 @@ class Tapper:
         turbo_time = 0
         active_turbo = False
 
+        headers = get_headers(name=self.tg_client.name)
+
         proxy_conn = ProxyConnector().from_url(proxy) if proxy else None
         http_client = aiohttp.ClientSession(headers=headers, connector=proxy_conn)
 
@@ -334,6 +385,8 @@ class Tapper:
                     http_client = aiohttp.ClientSession(headers=headers, connector=proxy_conn)
 
                 if time() - access_token_created_time >= 3600:
+                    await self.get_nuxt_builds(http_client=http_client)
+
                     access_token = await self.login(http_client=http_client, tg_web_data=tg_web_data)
 
                     if not access_token:
@@ -360,7 +413,71 @@ class Tapper:
                     available_energy = profile_data.get('availableTaps', 0)
                     balance = int(profile_data.get('balanceCoins', 0))
 
-                    upgrades = await self.get_upgrades(http_client=http_client)
+                    upgrades_data = await self.get_upgrades(http_client=http_client)
+
+                    upgrades = upgrades_data['upgradesForBuy']
+                    daily_combo = upgrades_data.get('dailyCombo')
+                    if daily_combo:
+                        bonus = daily_combo['bonusCoins']
+                        is_claimed = daily_combo['isClaimed']
+
+                        if not is_claimed:
+                            combo_cards = await self.get_combo_cards(http_client=http_client)
+
+                            cards = combo_cards['combo']
+                            date = combo_cards['date']
+
+                            available_combo_cards = [
+                                data for data in upgrades
+                                if data['isAvailable'] is True
+                                   and data['id'] in cards
+                                   and data['isExpired'] is False
+                                   and data.get('cooldownSeconds', 0) == 0
+                                   and data.get('maxLevel', data['level']) >= data['level']
+                                   and (data.get('condition') is None
+                                        or data['condition'].get('_type') != 'SubscribeTelegramChannel')
+                            ]
+
+                            if date == datetime.now().strftime("%d-%m-%y"):
+                                common_price = sum([upgrade['price'] for upgrade in available_combo_cards])
+
+                                if common_price < bonus and balance > common_price:
+                                    for upgrade in available_combo_cards:
+                                        upgrade_id = upgrade['id']
+                                        level = upgrade['level']
+                                        price = upgrade['price']
+                                        profit = upgrade['profitPerHourDelta']
+
+                                        logger.info(f"{self.session_name} | "
+                                                    f"Спим 5 сек. перед покупкой <r>комбо</r> карт <e>{upgrade_id}</e>")
+
+                                        await asyncio.sleep(delay=5)
+
+                                        status, upgrades = await self.buy_upgrade(http_client=http_client,
+                                                                                  upgrade_id=upgrade_id)
+
+                                        if status is True:
+                                            earn_on_hour += profit
+                                            balance -= price                                                                            
+                                            price_str = f"{price:,}".replace(',', '.')
+                                            earn_on_hour_str = f"{earn_on_hour:,}".replace(',', '.')
+                                            balance_str = f"{balance:,}".replace(',', '.')
+                                            profit_str = f"{profit:,}".replace(',', '.')
+                                    
+                                            logger.success(
+                                                    f"{self.session_name} | "
+                                                    f"Успешно улучшено <e>{upgrade_id}</e> с ценой <r>{price_str}</r> до <m>{level}</m> уровня | "
+                                                    f"Оставшиеся деньги: <e>{balance_str}</e>")
+
+
+
+                                            await asyncio.sleep(delay=2)
+
+                                            status = await self.claim_daily_combo(http_client=http_client)
+                                    if status is True:
+                                        logger.success(f"{self.session_name} | Успешно собрано ежедневное комбо | "
+                                                       f"Бонус: <g>+{bonus:,}</g>")
+
                     tasks = await self.get_tasks(http_client=http_client)
 
                     daily_task = tasks[-1]
@@ -503,7 +620,7 @@ class Tapper:
                         if (settings.APPLY_DAILY_ENERGY is True
                                 and energy_boost.get("cooldownSeconds", 0) == 0
                                 and energy_boost.get("level", 0) <= energy_boost.get("maxLevel", 0)):
-                            logger.info(f"{self.session_name} | Sleep 5s before apply energy boost")
+                            logger.info(f"{self.session_name} | Спим 5 сек. перед применением буста энергии")
                             await asyncio.sleep(delay=5)
 
                             status = await self.apply_boost(http_client=http_client, boost_id="BoostFullAvailableTaps")
@@ -549,4 +666,4 @@ async def run_tapper(tg_client: Client, proxy: str | None):
     try:
         await Tapper(tg_client=tg_client).run(proxy=proxy)
     except InvalidSession:
-        logger.error(f"{tg_client.name} | Invalid Session")
+        logger.error(f"{tg_client.name} | Неправильная сессия")

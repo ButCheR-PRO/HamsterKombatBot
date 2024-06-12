@@ -276,11 +276,15 @@ class Tapper:
                 balance_str = f"{balance:,}".replace(',', '.')
                 calc_taps_str = f"{calc_taps:,}".replace(',', '.')
                 total_str = f"{total:,}".replace(',', '.')
+                # Activate buying upgrades on new accounts
+                if earn_on_hour == 0:
+                    earn_on_hour = 100
 
                 logger.success(f"{self.session_name} | Успешный тап! | Баланс: <c>{balance_str}</c> (<g>+{calc_taps_str}</g>) | Всего: <e>{total_str}</e>")
 
                 if active_turbo is False:
                     if settings.AUTO_UPGRADE is True:
+                        failed_attempts = 0
                         for _ in range(settings.UPGRADES_COUNT):
                             available_upgrades = [
                                 data
@@ -310,7 +314,8 @@ class Tapper:
                                 free_money = balance - settings.BALANCE_TO_SAVE
                                 max_price_limit = earn_on_hour * 5
 
-                                if ((free_money * 0.7) >= price
+                                if (
+                                        (free_money * 0.7) >= price
                                         and level <= settings.MAX_LEVEL
                                         and profit > 0
                                         and price < settings.MAX_UPGRADE_PRICE
@@ -350,8 +355,10 @@ class Tapper:
                                         f"Успешно улучшено <e>{upgrade_id}</e> с ценой <r>{price_str}</r> до <m>{level}</m> уровня | "
                                         f"Оставшиеся деньги: <e>{balance_str}</e>")
                                 await asyncio.sleep(delay=1)
-
-                                continue
+                            else:
+                                failed_attempts += 1
+                                if failed_attempts >= len(available_upgrades):
+                                    continue
 
                     if available_energy < settings.MIN_AVAILABLE_ENERGY:
                         boosts = await get_boosts(http_client=http_client)
@@ -423,7 +430,7 @@ class Tapper:
                 if active_turbo is True:
                     sleep_between_clicks = 4
 
-                logger.info(f"Спим {sleep_between_clicks} секунд")
+                logger.info(f'Sleep {sleep_between_clicks}s')
                 await asyncio.sleep(delay=sleep_between_clicks)
 
 

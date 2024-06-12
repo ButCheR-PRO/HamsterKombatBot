@@ -430,7 +430,7 @@ class Tapper:
                 if active_turbo is True:
                     sleep_between_clicks = 4
 
-                logger.info(f'Sleep {sleep_between_clicks}s')
+                logger.info(f'Спим {sleep_between_clicks} сек.')
                 await asyncio.sleep(delay=sleep_between_clicks)
 
 
